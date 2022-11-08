@@ -1,0 +1,96 @@
+package main
+
+import "unsafe"
+
+func main() {
+
+}
+
+func mapassign(t *maptype, h *hmap, key unsafe.Pointer) unsafe.Pointer {
+	//获取hash算法
+	alg := t.key.alg
+	//计算hash值
+	hash := alg.hash(key, uintptr(h.hash0))
+	//如果bucket数组一开始为空，则初始化
+	if h.buckets == nil {
+		h.buckets = newobject(t.bucket) // newarray(t.bucket, 1)
+	}
+again:
+	// 定位存储在哪一个bucket中
+	bucket := hash & bucketMask(h.B)
+	//得到bucket的结构体
+	b := (*bmap)(unsafe.Pointer(uintptr(h.buckets) +bucket*uintptr(t.bucketsize)))
+	//获取高八位hash值
+	top := tophash(hash)
+	var inserti *uint8
+	var insertk unsafe.Pointer
+	var val unsafe.Pointer
+bucketloop:
+	//死循环
+	for {
+		//循环bucket中的tophash数组
+		for i := uintptr(0); i < bucketCnt; i++ {
+			//如果hash不相等
+			if b.tophash[i] != top {
+				//判断是否为空，为空则插入
+				if isEmpty(b.tophash[i]) && inserti == nil {
+					inserti = &b.tophash[i]
+					insertk = add(unsafe.Pointer(b), dataOffset+i*uintptr(t.keysize))
+					val = add( unsafe.Pointer(b),
+						dataOffset+bucketCnt*uintptr(t.keysize)+i*uintptr(t.valuesize) )
+				}
+				//插入成功，终止最外层循环
+				if b.tophash[i] == emptyRest {
+					break bucketloop
+				}
+				continue
+			}
+			//到这里说明高八位hash一样，获取已存在的key
+			k := add(unsafe.Pointer(b), dataOffset+i*uintptr(t.keysize))
+			if t.indirectkey() {
+				k = *((*unsafe.Pointer)(k))
+			}
+			//判断两个key是否相等，不相等就循环下一个
+			if !alg.equal(key, k) {
+				continue
+			}
+			// 如果相等则更新
+			if t.needkeyupdate() {
+				typedmemmove(t.key, k, key)
+			}
+			//获取已存在的value
+			val = add(unsafe.Pointer(b), dataOffset+bucketCnt*uintptr(t.keysize)+i*uintptr(t.valuesize))
+			goto done
+		}
+		//如果上一个bucket没能插入，则通过overflow获取链表上的下一个bucket
+		ovf := b.overflow(t)
+		if ovf == nil {
+			break
+		}
+		b = ovf
+	}
+
+	if inserti == nil {
+		// all current buckets are full, allocate a new one.
+		newb := h.newoverflow(t, b)
+		inserti = &newb.tophash[0]
+		insertk = add(unsafe.Pointer(newb), dataOffset)
+		val = add(insertk, bucketCnt*uintptr(t.keysize))
+	}
+
+	// store new key/value at insert position
+	if t.indirectkey() {
+		kmem := newobject(t.key)
+		*(*unsafe.Pointer)(insertk) = kmem
+		insertk = kmem
+	}
+	if t.indirectvalue() {
+		vmem := newobject(t.elem)
+		*(*unsafe.Pointer)(val) = vmem
+	}
+	typedmemmove(t.key, insertk, key)
+	//将高八位hash值存储
+	*inserti = top
+	h.count++
+	return val
+}
