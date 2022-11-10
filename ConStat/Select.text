@@ -1,0 +1,29 @@
+select { //不停的在这里检测
+    case <-chanl : //检测有没有数据可以读
+    //如果chanl成功读取到数据，则进行该case处理语句
+    case chan2 <- 1 : //检测有没有可以写
+    //如果成功向chan2写入数据，则进行该case处理语句
+
+    //假如没有default，那么在以上两个条件都不成立的情况下，就会在此阻塞//一般default会不写在里面，select中的default子句总是可运行的，因为会很消耗CPU资源
+    default:
+    //如果以上都没有符合条件，那么则进行default处理流程
+}
+
+// 2、退出
+// 主线程（协程）如下：
+var shouldQuit = make(chan struct{})
+
+func init() {
+	{
+		// loop
+	}
+	// ...out of the loop
+	select {
+	case <-c.shouldQuit:
+		cleanUp()
+		return
+	default:
+	}
+}
+//再另外一个协程中，如果运行遇到非法操作或不可处理的错误，就向shouldQuit发送数据通知程序停止运行
+close(shouldQuit)
